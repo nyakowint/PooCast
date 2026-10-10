@@ -34,19 +34,14 @@ class FlooInterface:
         if self.isSleep:
             return False
 
-        print([port.hwid for port in serial.tools.list_ports.grep('0A12:4007.*FMA120.*')])
-        ports = [port.name for port in serial.tools.list_ports.grep('0A12:4007.*FMA120.*')] # FMA120
+        ports = [port.device for port in serial.tools.list_ports.grep('0A12:4007.*FMA12[01].*')]
         if ports:
             if not self.port_opened:
                 self.port_name = ports[0]
                 print("monitor_port: try open " + self.port_name)
                 try:
-                    if platform.system().lower().startswith('win'):
-                        self.port = serial.Serial(port=self.port_name, baudrate=921600,
-                                                  bytesize=8, timeout=2, stopbits=serial.STOPBITS_ONE)
-                    else:
-                        self.port = serial.Serial(port='/dev/' + self.port_name, baudrate=921600,
-                                                  bytesize=8, timeout=2, stopbits=serial.STOPBITS_ONE)
+                    self.port = serial.Serial(port=self.port_name, baudrate=921600,
+                                              bytesize=8, timeout=2, stopbits=serial.STOPBITS_ONE)
 
                     # self.port.open()
                     self.port_opened = self.port.is_open

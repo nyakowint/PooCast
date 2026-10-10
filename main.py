@@ -14,6 +14,8 @@ from FlooStateMachineDelegate import FlooStateMachineDelegate
 from FlooDfuThread import FlooDfuThread
 from FlooSettings import FlooSettings
 from FlooAuxInput import FlooAuxInput
+from battery_panel import BatteryPanel
+from paired_device import selected_device
 from PIL import Image
 import urllib.request
 import certifi
@@ -51,7 +53,7 @@ else:
     lan = wx.Locale.GetLanguageInfo(userLocale).CanonicalName
 
 # Set the local directory
-app_path = os.path.abspath(os.path.dirname(sys.argv[0]))
+app_path = os.path.dirname(os.path.abspath(__file__))
 localedir = app_path + os.sep + 'locales'
 # Set up your magic function
 translate = gettext.translation("messages", localedir, languages=[lan], fallback=True)
@@ -82,9 +84,9 @@ leaStateStr = [_("Disconnected"),
 # create root window
 app = wx.App(False)
 settings = FlooSettings()
-startMinimized = bool(settings.get_item("start_minimized") or False)
+startMinimized = bool(settings.get_item("start_minimized", True))
 
-appFrame = wx.Frame(None, wx.ID_ANY, "FlooCast", size=wx.Size(mainWindowWidth, 560))
+appFrame = wx.Frame(None, wx.ID_ANY, "FlooCast", size=wx.Size(mainWindowWidth, mainWindowHeight + 65))
 appFrame.SetIcon(wx.Icon(app_path + os.sep + appIcon))
 
 statusBar = appFrame.CreateStatusBar(name=_("Status Bar"))
@@ -359,7 +361,26 @@ def quit_all():
 
 
 # Define a function for quit the window
+closing = False
+
+
 def quit_window(event):
+    global closing
+    if closing:
+        return
+    closing = True
+    batteryPanel.stop()
+    flooSm.inf.setSleep(True)
+    appPanel.Disable()
+    statusBar.SetStatusText("Closing: disconnecting battery reader...")
+    finish_quit()
+
+
+def finish_quit():
+    # Keep pumping wx while BLE cancellation awaits scanner/client cleanup.
+    if not batteryPanel.worker.join(0):
+        wx.CallLater(100, finish_quit)
+        return
     windowIcon.Destroy()
     appFrame.Destroy()
 
@@ -856,10 +877,12 @@ class PopMenu(wx.Menu):
         self.Append(menuItemDelete)
 
     def delete_selected(self, e):
-        flooSm.clearIndexedDevice(self.index)
+        if 0 <= self.index < len(currentPairedDeviceList):
+            flooSm.clearIndexedDevice(currentPairedDeviceList[self.index].index)
 
     def connect_disconnect_selected(self, e):
-        flooSm.toggleConnection(self.index)
+        if 0 <= self.index < len(currentPairedDeviceList):
+            flooSm.toggleConnection(currentPairedDeviceList[self.index].index)
 
 
 def OnContextMenu(Event):
@@ -870,9 +893,19 @@ def OnContextMenu(Event):
 pairedDeviceListbox = wx.ListBox(pairedDevicesSb, style=wx.LB_SINGLE | wx.LB_ALWAYS_SB)
 pairedDeviceListbox.Bind(wx.EVT_CONTEXT_MENU, OnContextMenu)
 currentPairedDeviceList = []
+batteryPanel = BatteryPanel(pairedDevicesSb)
+
+
+def battery_selection_changed(event):
+    batteryPanel.set_devices(currentPairedDeviceList, pairedDeviceListbox.GetSelection())
+    event.Skip()
+
+
+pairedDeviceListbox.Bind(wx.EVT_LISTBOX, battery_selection_changed)
 
 pairedDevicesSbPanelSizer.Add(pairedDevicesSbButtonPanel, proportion=0, flag=wx.EXPAND)
 pairedDevicesSbPanelSizer.Add(pairedDeviceListbox, proportion=1, flag=wx.EXPAND)
+pairedDevicesSbPanelSizer.Add(batteryPanel, proportion=0, flag=wx.EXPAND | wx.ALL, border=4)
 
 broadcastAndPairedDeviceSizer.Add(leBroadcastSbSizer, proportion=0, flag=wx.EXPAND)
 broadcastAndPairedDeviceSizer.Add(pairedDevicesSbPanelSizer, proportion=1, flag=wx.EXPAND)
@@ -1176,7 +1209,8 @@ def button_dfu(event):
 
 if platform.system().lower().startswith('win'):
     dfuButton = wx.Button(versionPanel, wx.ID_ANY, label=_('Device Firmware Upgrade'))
-    dfuButton.Bind(wx.EVT_BUTTON, button_dfu)
+    dfuButton.SetToolTip(_('Firmware updates require the official FlooCast release.'))
+    dfuButton.Disable()
     versionPanelSizer.Add(dfuButton, flag=wx.ALIGN_CENTER | wx.BOTTOM, border=4)
 
 dfuInfo = wx.StaticText(versionPanel, wx.ID_ANY, "")
@@ -1223,7 +1257,7 @@ def enable_settings_widgets(enable: bool):
         thirdPartyLink.Refresh()
         supportLink.Refresh()
         if platform.system().lower().startswith('win'):
-            dfuButton.Enable(not dfuUndergoing)
+            dfuButton.Disable()  # Vendor DFU implementation is absent from public source.
     else:
         audioModeSb.Disable()
         broadcastAndPairedDevicePanel.Disable()
@@ -1234,7 +1268,7 @@ def enable_settings_widgets(enable: bool):
 
 enable_settings_widgets(False)
 
-if startMinimized:
+if startMinimized and '--show' not in sys.argv:
     appFrame.Iconize(True)
     appFrame.Hide()
 else:
@@ -1254,6 +1288,10 @@ class FlooSmDelegate(FlooStateMachineDelegate):
         global aboutSbSizer
         global broadcastUsbVolCtrSupported
         global broadcast2QualitySupported
+        global currentPairedDeviceList
+
+        if closing:
+            return
 
         if flag:
             update_status_bar(_("Use FlooGoo dongle on ") + " " + port)
@@ -1321,6 +1359,8 @@ class FlooSmDelegate(FlooStateMachineDelegate):
         else:
             update_status_bar(_("Please insert your FlooGoo dongle"))
             pairedDeviceListbox.Clear()
+            currentPairedDeviceList = []
+            batteryPanel.set_devices([], wx.NOT_FOUND)
             versionPanelSizer.Hide(dfuInfo)
             versionPanelSizer.Hide(newFirmwareUrl)
             versionPanelSizer.Hide(firmwareDesc)
@@ -1389,13 +1429,21 @@ class FlooSmDelegate(FlooStateMachineDelegate):
         broadcastNameEntry.SetValue(name)
 
     def pairedDevicesUpdateInd(self, pairedDevices):
+        global currentPairedDeviceList
+        if closing:
+            return
+        previous = selected_device(currentPairedDeviceList, pairedDeviceListbox.GetSelection())
+        currentPairedDeviceList = list(pairedDevices)
         pairedDeviceListbox.Clear()
         i = 0
         while i < len(pairedDevices):
             # print(pairedDevices[i])
-            pairedDeviceListbox.Append(pairedDevices[i])
+            pairedDeviceListbox.Append(pairedDevices[i].name)
+            if previous and pairedDevices[i].btAddress == previous.btAddress:
+                pairedDeviceListbox.SetSelection(i)
             i = i + 1
         newPairingButton.Enable(False if preferLeaEnable and i > 0 else True)
+        batteryPanel.set_devices(currentPairedDeviceList, pairedDeviceListbox.GetSelection())
         # clearAllButton.Enable(True if i > 0 else False)
 
     def audioCodecInUseInd(self, codec, rssi, rate, spkSampleRate, micSampleRate,
@@ -1463,9 +1511,23 @@ class FlooSmDelegate(FlooStateMachineDelegate):
         usb_input_enable_switch_set(enabled, True)
 
 
+def guard_delegate_callback(method):
+    def guarded(*args, **kwargs):
+        if not closing and appFrame and not appFrame.IsBeingDeleted():
+            return method(*args, **kwargs)
+    return guarded
+
+
+# Serial callbacks may already be queued when shutdown starts.
+for callback_name, callback_method in list(FlooSmDelegate.__dict__.items()):
+    if callable(callback_method) and not callback_name.startswith('_'):
+        setattr(FlooSmDelegate, callback_name, guard_delegate_callback(callback_method))
+
 flooSmDelegate = FlooSmDelegate()
 flooSm = FlooStateMachine(flooSmDelegate)
 flooSm.daemon = True
 flooSm.start()
 
 app.MainLoop()
+batteryPanel.stop()
+batteryPanel.worker.join()

@@ -7,4 +7,5 @@
 *.dll
 *.msix
 *.spec
+/.venv/
 

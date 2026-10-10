@@ -25,6 +25,7 @@ from FlooMsgTc import FlooMsgTc
 from FlooMsgFd import FlooMsgFd
 from FlooMsgFt import FlooMsgFt
 import wx
+from paired_device import PairedDevice
 
 
 class FlooStateMachine(FlooInterfaceDelegate, Thread):
@@ -130,12 +131,12 @@ class FlooStateMachine(FlooInterfaceDelegate, Thread):
                 if isinstance(self.lastCmd, FlooMsgFn):
                     if message.btAddress is None:
                         # end of the device list
-                        wx.CallAfter(self.delegate.pairedDevicesUpdateInd, self.pairedDevices)
+                        wx.CallAfter(self.delegate.pairedDevicesUpdateInd, tuple(self.pairedDevices))
                         cmdGetFeature = FlooMsgFt(True)
                         self.inf.sendMsg(cmdGetFeature)
                         self.lastCmd = cmdGetFeature
                     else:
-                        self.pairedDevices.append(message.name)
+                        self.pairedDevices.append(PairedDevice(message.index, message.name, message.btAddress))
             elif isinstance(message, FlooMsgFt):
                 if isinstance(self.lastCmd, FlooMsgFt):
                     self.feature = message.feature
@@ -174,7 +175,7 @@ class FlooStateMachine(FlooInterfaceDelegate, Thread):
                     self.lastCmd = None
                 elif isinstance(self.lastCmd, FlooMsgCp):
                     self.pairedDevices.clear()
-                    self.delegate.pairedDevicesUpdateInd([])
+                    wx.CallAfter(self.delegate.pairedDevicesUpdateInd, ())
                 elif isinstance(self.lastCmd, FlooMsgFt):
                     self.feature = self.lastCmd.feature
                     self.lastCmd = None
@@ -208,10 +209,10 @@ class FlooStateMachine(FlooInterfaceDelegate, Thread):
             elif isinstance(message, FlooMsgFn):
                 if message.btAddress is None:
                     # end of the device list
-                    wx.CallAfter(self.delegate.pairedDevicesUpdateInd, self.pairedDevices)
+                    wx.CallAfter(self.delegate.pairedDevicesUpdateInd, tuple(self.pairedDevices))
                     self.lastCmd = None
                 else:
-                    self.pairedDevices.append(message.name)
+                    self.pairedDevices.append(PairedDevice(message.index, message.name, message.btAddress))
             elif isinstance(message, FlooMsgAc):
                 wx.CallAfter(self.delegate.audioCodecInUseInd, message.codec, message.rssi, message.rate,
                              message.spkSampleRate, message.micSampleRate, message.sduInterval, message.transportDelay,

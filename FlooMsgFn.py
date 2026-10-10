@@ -3,7 +3,7 @@ from FlooMessage import FlooMessage
 class FlooMsgFn(FlooMessage):
     """
     BC:FN
-    FN=<index>,<name>
+    FN=<hex index>,<12-digit address>,<name>
     """
 
     HEADER = "FN"
@@ -29,10 +29,10 @@ class FlooMsgFn(FlooMessage):
     def create_valid_msg(cls, payload: bytes):
         msgLen = len(payload)
         if msgLen == 5:
-            return cls(False, int(payload[3:5].decode('ascii')))
+            return cls(False, int(payload[3:5].decode('ascii'), 16))
         elif msgLen == 18:
-            return cls(False, int(payload[3:5].decode('ascii')), payload[6:].decode('utf-8'))
+            return cls(False, int(payload[3:5].decode('ascii'), 16), payload[6:].decode('utf-8'))
         elif msgLen > 19:
-            return cls(False, int(payload[3:5].decode('ascii')), payload[6:18].decode('utf-8'), payload[19:].decode('utf-8', errors="ignore"))
+            return cls(False, int(payload[3:5].decode('ascii'), 16), payload[6:18].decode('utf-8'), payload[19:].decode('utf-8', errors="ignore"))
         else:
             return None

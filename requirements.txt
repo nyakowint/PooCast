@@ -3,3 +3,7 @@ pySerial==3.5
 certifi==2025.8.3
 pillow==11.3.0
 urllib3==2.5.0
+numpy==2.2.6
+sounddevice==0.5.3
+bleak==3.0.2
+winrt-Windows.Devices.Radios==3.2.1; sys_platform == "win32"
