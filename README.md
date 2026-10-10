@@ -2,6 +2,8 @@
 
 A very sloppily made fork of FlooCast, that uses bluetooth to check the battery level of whatever device you have connected.
 Bluetooth is obviously required to be enabled on your PC, along with connecting your device thru whatever method you normally do (presumably your FlooGoo dongle)
+A dropped connection or
+read failure due to connection problems can still cause devices with announcers to yap "connected" "disconnected" etc etc
 
 You cant firmware update from this fork or upstream either for that matter because they dont include the stuff for it. soz lol
 

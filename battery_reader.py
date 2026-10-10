@@ -23,6 +23,62 @@ class BatteryServiceUnavailable(RuntimeError):
     """The connected device does not expose the standard battery characteristic."""
 
 
+class BatteryConnection:
+    """Reuse one BLE connection between reads; caller must await aclose on exit.
+
+    All methods must run serially on the same asyncio loop. Connection changes
+    are limited to target changes, failures, and shutdown, not successful polls.
+    """
+
+    def __init__(self):
+        self.address = None
+        self.client = None
+
+    @property
+    def is_connected(self):
+        return self.client is not None and self.client.is_connected
+
+    async def aclose(self):
+        if self.client is not None:
+            # Keep ownership if cleanup fails so the next operation can retry it.
+            await asyncio.wait_for(self.client.disconnect(), timeout=10)
+            self.client = None
+        self.address = None
+
+    async def read(self, address, timeout=10):
+        if timeout <= 0:
+            raise ValueError("The Bluetooth timeout must be positive.")
+        if self.address != address:
+            await self.aclose()
+        for attempt in range(2):
+            try:
+                return await asyncio.wait_for(
+                    self._read_once(address, timeout, attempt == 0), timeout * 2 + 5)
+            except BaseException as error:
+                # Includes cancellation: release a connection opened by an obsolete read.
+                await self.aclose()
+                if attempt or not isinstance(error, (BatteryServiceUnavailable, BleakError, TimeoutError, OSError)):
+                    raise
+                logger.warning("Battery connection failed; retrying in two seconds: %s", error)
+            await asyncio.sleep(2)
+
+    async def _read_once(self, address, timeout, use_cached_services):
+        if not self.is_connected:
+            await self.aclose()
+            device = await BleakScanner.find_device_by_address(address, timeout=timeout)
+            if device is None:
+                raise BleakError("Headset not found. Keep it powered on and near the PC.")
+            self.address = address
+            self.client = BleakClient(device, timeout=timeout, services=[BATTERY_SERVICE_UUID],
+                                      winrt={"use_cached_services": use_cached_services})
+            await self.client.connect()
+        characteristic = self.client.services.get_characteristic(BATTERY_LEVEL_UUID)
+        if characteristic is None:
+            raise BatteryServiceUnavailable("This headset does not expose a BLE Battery Level.")
+        raw_value = await self.client.read_gatt_char(characteristic, use_cached=False)
+        return decode_battery_level(raw_value)
+
+
 def decode_battery_level(raw_value: bytes | bytearray) -> int:
     """Convert the characteristic's single byte to a percentage from 0 to 100.
 

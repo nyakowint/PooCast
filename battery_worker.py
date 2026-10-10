@@ -28,12 +28,29 @@ async def check_bluetooth():
         raise RuntimeError("PC Bluetooth radio state is unavailable. Try Refresh.")
 
 
-async def read_headset(address):
-    # Lazy import keeps the rest of FlooCast usable without battery dependencies.
-    from battery_reader import read_battery_level
+class HeadsetReader:
+    def __init__(self):
+        self.connection = None
 
-    await check_bluetooth()
-    return await read_battery_level(address, timeout=10)
+    async def __call__(self, address):
+        # Lazy import keeps FlooCast usable without battery dependencies.
+        from battery_reader import BatteryConnection
+
+        # A live GATT connection already establishes adapter availability. Avoid
+        # tearing it down because of a transient/lagging radio-state snapshot.
+        if self.connection is None or not self.connection.is_connected:
+            try:
+                await check_bluetooth()
+            except BaseException:
+                await self.aclose()
+                raise
+        if self.connection is None:
+            self.connection = BatteryConnection()
+        return await self.connection.read(address, timeout=10)
+
+    async def aclose(self):
+        if self.connection is not None:
+            await self.connection.aclose()
 
 
 class BatteryWorker:
@@ -43,10 +60,10 @@ class BatteryWorker:
     A cancelled task retains ownership until its disconnect/cleanup has finished.
     """
 
-    def __init__(self, callback, dispatch, reader=read_headset, deadline=55):
+    def __init__(self, callback, dispatch, reader=None, deadline=55):
         self.callback = callback
         self.dispatch = dispatch
-        self.reader = reader
+        self.reader = reader if reader is not None else HeadsetReader()
         self.deadline = deadline
         self.target = None
         self.generation = 0
@@ -57,6 +74,7 @@ class BatteryWorker:
         self._pending = None
         self._stopping = False
         self._startup_error = None
+        self._session_target = None
         self._thread = threading.Thread(target=self._run, name="FlooCast battery", daemon=False)
         self._thread.start()
 
@@ -101,7 +119,8 @@ class BatteryWorker:
     def _replace(self, generation, address):
         if self._stopping:
             return
-        self._pending = (generation, address) if address else None
+        # A None target still needs a task to close an idle retained connection.
+        self._pending = (generation, address)
         if self._active is not None:
             if not self._active.cancelling():
                 self._active.cancel()
@@ -119,6 +138,11 @@ class BatteryWorker:
         try:
             if self._startup_error is not None:
                 raise self._startup_error
+            if address != self._session_target:
+                await self._close_reader()
+                self._session_target = address
+            if address is None:
+                return
             value = await asyncio.wait_for(self.reader(address), self.deadline)
             if type(value) is not int or not 0 <= value <= 100:
                 raise ValueError("Battery Level must be an integer from 0 to 100.")
@@ -149,7 +173,7 @@ class BatteryWorker:
             log.exception("Battery worker callback failed")
         self._active = None
         if self._stopping:
-            self._loop.stop()
+            self._start_shutdown()
         else:
             self._start_pending()
 
@@ -165,9 +189,28 @@ class BatteryWorker:
         self._stopping = True
         self._pending = None
         if self._active is None:
-            self._loop.stop()
+            self._start_shutdown()
         elif not self._active.cancelling():
             self._active.cancel()
+
+    async def _close_reader(self):
+        close = getattr(self.reader, "aclose", None)
+        if close is not None:
+            await close()
+
+    def _start_shutdown(self):
+        # Runs even when no read is active: successful polls retain the client.
+        self._active = self._loop.create_task(self._close_reader())
+        self._active.add_done_callback(self._shutdown_finished)
+
+    def _shutdown_finished(self, task):
+        try:
+            task.result()
+        except BaseException:
+            log.exception("Could not cleanly disconnect the battery connection")
+        finally:
+            self._active = None
+            self._loop.stop()
 
     def join(self, timeout=None):
         self._thread.join(timeout)

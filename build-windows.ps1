@@ -30,7 +30,7 @@ try {
     if ($LASTEXITCODE -ne 0) { throw 'PyInstaller build failed.' }
 
     Copy-Item -LiteralPath LICENSE -Destination dist\LICENSE.txt
-    Copy-Item -LiteralPath WINDOWS-BUILD.md -Destination dist\WINDOWS-BUILD.md
+    Copy-Item -LiteralPath README.md -Destination dist\README.md
     Write-Host "Built $PSScriptRoot\dist\FlooCast.exe"
 } finally {
     Pop-Location

@@ -19,6 +19,8 @@ class BatteryPanel(wx.Panel):
         self.help = wx.StaticText(
             self, label="Battery uses PC Bluetooth (enable in Settings). Dongle audio is independent.")
         self.help.Wrap(520)
+        self.help.SetToolTip("Keeps the battery connection open while FlooCast is running, including in the tray. "
+                             "Changing headset or quitting releases it.")
         layout = wx.BoxSizer(wx.VERTICAL)
         layout.Add(row, 0, wx.EXPAND)
         layout.Add(self.help, 0, wx.TOP, 2)
