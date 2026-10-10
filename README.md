@@ -1,3 +1,19 @@
+## PooCast
+
+A very sloppily made fork of FlooCast, that uses bluetooth to check the battery level of whatever device you have connected.
+Bluetooth is obviously required to be enabled on your PC, along with connecting your device thru whatever method you normally do (presumably your FlooGoo dongle)
+
+You cant firmware update from this fork or upstream either for that matter because they dont include the stuff for it. soz lol
+
+if your name is paige you may leave the pa(i)ge now
+
+As this was made for personal use and not for profeshional shipping, i really cba
+
+Clankers used: GPT-6-Astra and GPT-6.1-Sol
+Humans used: the ability to read
+yo mama: XBOX LIIIIIIIIIIIIIIVE
+my steam? framed. sike im STILL waitlisted mf
+
 # FlooCast
 
 A Python application that allows for the control and configuration of FlooGoo USB Bluetooth dongles.
@@ -55,4 +71,3 @@ You may take the following link as a reference,
 https://askubuntu.com/questions/133235/how-do-i-allow-non-root-access-to-ttyusb0
 
 ## Acknowledgements
-
